@@ -1,0 +1,46 @@
+#!/usr/bin/python3
+import os
+
+from common import (
+    constants,
+    helpers,
+    searchtools,
+)
+
+
+CEPH_LOGS = "var/log/ceph/"
+DAEMON_INFO = {}
+MAX_RESULTS = 5
+
+
+def get_daemon_info():
+    data_source = os.path.join(constants.DATA_ROOT, CEPH_LOGS, 'ceph*.log')
+    if constants.USE_ALL_LOGS:
+        data_source = "{}*".format(data_source)
+
+    s = searchtools.FileSearcher()
+    s.add_search_term((r"^([0-9-]+) (\S+) .+ (osd.[0-9]+) .+ reported failed "
+                       "by (osd.[0-9]+) .+"),
+                      [1, 2, 3, 4], data_source, tag="osd-reported-failed")
+
+    results = s.search()
+    for result in results.find_by_tag("osd-reported-failed"):
+        date = result.get(1)
+        time = result.get(2)
+        src_osd = result.get(3)
+        dst_osd = result.get(4)
+        DAEMON_INFO[dst_osd] = {"src_osd": src_osd,
+                                "time": "{}_{}".format(date, time)}
+
+
+if __name__ == "__main__":
+    get_daemon_info()
+    if DAEMON_INFO:
+        DAEMON_INFO = {"daemon-errors": DAEMON_INFO}
+        if not helpers.HOTSOSYaml.master_has_plugin("storage"):
+            DAEMON_INFO = {"storage": DAEMON_INFO}
+            indent = 0
+        else:
+            indent = 2
+
+        helpers.HOTSOSYaml.dump(DAEMON_INFO, indent=indent)
